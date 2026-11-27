@@ -9,7 +9,9 @@ const SCENARIOS = [
     run: async () => {
       const res = await fetch("/api/gifts");
       const data = await res.json();
-      return data.items.map((g) => g.name); // 버그: items 가 undefined
+      // 버그 수정: API 응답에 items 가 없거나 배열이 아닐 수 있으므로 안전하게 처리한다
+      const items = Array.isArray(data.items) ? data.items : [];
+      return items.map((g) => g.name);
     },
   },
   {
