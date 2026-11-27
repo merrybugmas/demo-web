@@ -30,7 +30,11 @@ const SCENARIOS = [
     desc: "점검 페이지(HTML)가 왔는데 상태·타입 확인 없이 JSON 으로 읽는다.",
     run: async () => {
       const res = await fetch("/api/notice");
-      return JSON.parse(await res.text()); // 버그: HTML 을 JSON 으로 파싱
+      // 버그 수정: 응답의 Content-Type 을 확인해 JSON 이 아니면 HTML 을 JSON.parse 하지 않는다
+      const ct = (res.headers.get("content-type") || "").toLowerCase();
+      if (ct.includes("application/json")) return await res.json();
+      const text = await res.text();
+      try { return JSON.parse(text); } catch (e) { return { ok: false, error: "not json", body: text }; }
     },
   },
   {
