@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bugmas Gift Shop — demo-web</title>
+  <!-- Sentry 로더: 브라우저용 공개 키(DSN)라 코드에 있어도 된다. 테스트 프로젝트 merrybugmas/web 으로 간다 -->
+  <script src="https://js.sentry-cdn.com/cac026a0504c4ac7cf232f07ecc06de6.min.js" crossorigin="anonymous"></script>
+  <script>
+    if (window.Sentry && Sentry.onLoad) {
+      Sentry.onLoad(function () {
+        Sentry.init({ environment: "demo", release: "demo-web@1.0.0", tracesSampleRate: 0 });
+        Sentry.setTag("service", "WEB");
+      });
+    }
+  </script>
+  <style>
+    :root { --bg: #fbf7f0; --card: #ffffff; --ink: #2a2320; --muted: #7a6f68; --line: #e6dccf; --red: #b3262b; --green: #1f6b45; --gold: #c58a1a; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #17120f; --card: #221b17; --ink: #f1e9df; --muted: #a89b90; --line: #3a2f28; --red: #e0605f; --green: #5fbf8d; --gold: #e2b04a; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; }
+    main { max-width: 860px; margin: 0 auto; padding: 28px 16px 56px; }
+    h1 { margin: 0 0 4px; font-size: 26px; }
+    p.lead { margin: 0 0 22px; color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+    .card h2 { margin: 0; font-size: 16px; }
+    .card p { margin: 0; color: var(--muted); font-size: 13.5px; flex: 1; }
+    .tag { align-self: flex-start; font-size: 11.5px; padding: 1px 8px; border-radius: 99px; border: 1px solid currentColor; }
+    .fixable { color: var(--green); } .noise { color: var(--muted); } .human { color: var(--red); }
+    button { font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+    button:hover { border-color: var(--gold); }
+    #log { margin-top: 22px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font: 13px/1.6 ui-monospace, Menlo, monospace; min-height: 84px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    #sdk { font-size: 13px; color: var(--muted); margin-top: 10px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>🎁 Bugmas Gift Shop</h1>
+  <p class="lead">일부러 버그를 심어 둔 데모 상점. 버튼을 누르면 <b>진짜 브라우저 에러</b>가 나고 Sentry 로 간다.
+    MERRY BUGMAS 대시보드(<code>--live</code>)에서는 그 에러가 쥐로 나타난다.</p>
+
+  <div class="grid" id="cards"></div>
+  <div id="log">아직 아무 일도 없다. 버튼을 눌러 보자.</div>
+  <div id="sdk"></div>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
