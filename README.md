@@ -51,6 +51,12 @@ cd ../merrybugmas && python3 xmas_market.py --live     # .env 에 SENTRY_AUTH_TO
 - **Web Vitals**: 페이지(`app.js`)가 브라우저의 `PerformanceObserver` 로 LCP · CLS · INP · TTFB 를 실제로 재서 `POST /api/vitals` 로 보고한다. 서버는 최근 50건의 p75 를 낸다. LCP · CLS · INP 는 Chromium 계열에서만 측정되고, INP 는 사람이 실제로 클릭해야 생긴다. 보고가 없는 항목은 내보내지 않는다. 탭을 뒤에 둔 채 열면 화면이 늦게 그려져 LCP 가 크게 나온다
 - 5xx 비율을 올려 보려면 `python3 loadgen.py 25 --errors 0.15` (요청의 15% 를 503 나는 API 로).
 - `loadgen.py` 가 평소 트래픽을 만든다. `python3 loadgen.py 25 --spike 110 --at 15 --for 20` 처럼 급증도 넣을 수 있다. localhost 전용이다.
+- **처리 용량**: `/api/*` 는 동시에 2개(`DEMO_CAPACITY`)까지만 처리하고 `/api/ping` 도 20ms 걸린다. 약 65 rps 가 한계라
+  `--spike 110` 이면 응답 시간과 5xx(자리를 1초 못 얻으면 503 overloaded)가 **실제로** 오른다.
+- **레버** (`GET`·`POST /admin/levers`, localhost 에서만): MERRY BUGMAS 대시보드의 엘프 에이전트가 당긴다.
+  `{"cache": true}`(/api/gifts 캐시) · `{"capacity": 4}`(슬롯 1~16) · `{"waitroom": true}`(번호표: 0.15초 안에 자리가 없으면 429).
+  상태는 `/metrics` 의 `demo_capacity` · `demo_inflight` · `demo_waiting` · `demo_cache_enabled` · `demo_waitroom_enabled` · `demo_rejected_total{reason}`.
+  110 rps 급증에서 측정: 그대로 5xx 15% · 769ms → 캐시 0% · 46ms → 캐시+슬롯 4 0% · 25ms / 번호표만 5xx 0% · 429 35%
 - 페이지의 **크리스마스 특가 오픈** 버튼은 브라우저에서 20초 동안 약 90 rps 로 요청을 보낸다. 대시보드의 줄이 길어지고 인파 경보가 뜬다 (대시보드 `TRAFFIC_PEAK` 기본값 100 rps 기준).
 
 ## 알아 둘 것

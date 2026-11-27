@@ -20,7 +20,20 @@
                             MERRY BUGMAS 대시보드(--live)가 이 값을 읽어 줄·5xx 비율·응답 시간·Web Vitals 를 보여 준다
   POST /api/vitals          페이지가 측정한 Web Vitals(LCP·CLS·INP·TTFB) 보고
 
-/api/gifts 는 느린 DB 를 흉내 내 80~160ms 걸린다 (응답 시간 지표가 0 이 아니게).
+/api/gifts 는 느린 DB 를 흉내 내 80~160ms 걸린다 (응답 시간 지표가 0 이 아니게). /api/ping 도 20ms.
+
+처리 용량 (트래픽이 몰리면 실제로 밀리게)
+  /api/* 는 동시에 capacity 개(기본 2, DEMO_CAPACITY)까지만 처리한다. 자리가 없으면 1초까지 기다리다 503(과부하).
+  2 슬롯이면 약 65 rps 가 한계라 loadgen --spike 110 이면 응답 시간과 5xx 가 실제로 오른다.
+
+레버 (MERRY BUGMAS 대시보드의 엘프 에이전트가 당긴다, localhost 에서만)
+  GET  /admin/levers        {"cache": false, "capacity": 2, "waitroom": false, ...}
+  POST /admin/levers        {"cache": true} · {"capacity": 4} · {"waitroom": true} 중 바꿀 것만
+    cache    = /api/gifts 응답 캐시 (80~160ms → 수 ms)
+    capacity = 동시 처리 슬롯 수 (1~16, 계산대 수)
+    waitroom = 번호표: 자리가 0.15초 안에 안 나면 기다리게 두지 않고 바로 429 (5xx 대신)
+  /metrics 에 demo_capacity · demo_inflight · demo_waiting · demo_cache_enabled · demo_waitroom_enabled
+  · demo_rejected_total{reason="overload|waitroom"} 이 같이 나간다. /admin 요청은 세지 않는다.
 """
 import json
 import os
@@ -37,6 +50,60 @@ DURATION = {"sum": 0.0, "count": 0}  # 처리 시간(초) 합 · 건수
 VITALS = {"lcp": [], "cls": [], "inp": [], "ttfb": []}  # 최근 보고 50건씩 (LCP·INP·TTFB 는 초)
 VITAL_MAX = {"lcp": 60.0, "cls": 10.0, "inp": 60.0, "ttfb": 60.0}  # 이보다 크면 잘못된 보고로 보고 버린다
 REPORTS = {"n": 0}
+LEVERS = {"cache": False, "capacity": max(1, min(16, int(os.environ.get("DEMO_CAPACITY", "2") or 2))), "waitroom": False}
+SLOTS = {"inflight": 0, "waiting": 0}
+REJECTED = {"overload": 0, "waitroom": 0}
+SLOT_CV = threading.Condition()
+OVERLOAD_WAIT, WAITROOM_WAIT = 1.0, 0.15  # 자리를 기다리는 최대 시간(초): 평소 · 번호표 켜짐
+
+
+def take_slot():
+    """처리 슬롯 하나를 얻는다. 못 얻으면 None 대신 거절 이유("overload"/"waitroom")를 돌려준다."""
+    with SLOT_CV:
+        limit = WAITROOM_WAIT if LEVERS["waitroom"] else OVERLOAD_WAIT
+        end = time.monotonic() + limit
+        SLOTS["waiting"] += 1
+        try:
+            while SLOTS["inflight"] >= LEVERS["capacity"]:
+                left = end - time.monotonic()
+                if left <= 0:
+                    reason = "waitroom" if LEVERS["waitroom"] else "overload"
+                    REJECTED[reason] += 1
+                    return reason
+                SLOT_CV.wait(left)
+            SLOTS["inflight"] += 1
+            return None
+        finally:
+            SLOTS["waiting"] -= 1
+
+
+def give_slot():
+    with SLOT_CV:
+        SLOTS["inflight"] -= 1
+        SLOT_CV.notify()
+
+
+def set_levers(data):
+    """POST /admin/levers 본문을 반영한다. 모르는 키나 이상한 값은 ValueError."""
+    if not isinstance(data, dict) or not data:
+        raise ValueError("바꿀 레버가 없음")
+    new = dict(LEVERS)
+    for k, v in data.items():
+        if k in ("cache", "waitroom") and isinstance(v, bool):
+            new[k] = v
+        elif k == "capacity" and isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 16:
+            new[k] = v
+        else:
+            raise ValueError("레버 값이 이상함: %s=%r" % (k, v))
+    with SLOT_CV:
+        LEVERS.update(new)
+        SLOT_CV.notify_all()  # 슬롯이 늘었으면 기다리던 요청을 깨운다
+    return lever_state()
+
+
+def lever_state():
+    with SLOT_CV:
+        return dict(LEVERS, inflight=SLOTS["inflight"], waiting=SLOTS["waiting"], rejected=dict(REJECTED))
 
 
 def p75(values):
@@ -90,6 +157,15 @@ class Handler(SimpleHTTPRequestHandler):
                 v = p75(VITALS[key])
                 if v is not None:  # 보고가 없으면 아예 내보내지 않는다 (0 으로 꾸미지 않는다)
                     out += ["# TYPE %s gauge" % name, "%s %.4f" % (name, v)]
+        st = lever_state()
+        out += ["# HELP demo_capacity Concurrent request slots (lever).", "# TYPE demo_capacity gauge",
+                "demo_capacity %d" % st["capacity"],
+                "# TYPE demo_inflight gauge", "demo_inflight %d" % st["inflight"],
+                "# TYPE demo_waiting gauge", "demo_waiting %d" % st["waiting"],
+                "# TYPE demo_cache_enabled gauge", "demo_cache_enabled %d" % st["cache"],
+                "# TYPE demo_waitroom_enabled gauge", "demo_waitroom_enabled %d" % st["waitroom"],
+                "# TYPE demo_rejected_total counter"]
+        out += ['demo_rejected_total{reason="%s"} %d' % kv for kv in sorted(st["rejected"].items())]
         return self.send_body(200, "\n".join(out) + "\n", "text/plain; version=0.0.4; charset=utf-8")
 
     def vitals(self):
@@ -107,14 +183,41 @@ class Handler(SimpleHTTPRequestHandler):
                     VITALS[key] = (VITALS[key] + [float(v)])[-50:]
         return self.send_body(200, '{"ok":true}')
 
+    def admin(self):
+        """레버 조회·변경. 같은 컴퓨터(127.0.0.1)에서 온 요청만 받는다."""
+        if self.client_address[0] not in ("127.0.0.1", "::1"):
+            return self.send_body(403, json.dumps({"error": "localhost only"}))
+        if self.command == "POST":
+            try:
+                n = max(0, min(int(self.headers.get("Content-Length") or 0), 2000))
+                st = set_levers(json.loads(self.rfile.read(n).decode("utf-8") or "{}"))
+            except (ValueError, UnicodeDecodeError) as e:
+                return self.send_body(400, json.dumps({"error": str(e)}, ensure_ascii=False))
+            print("lever: %s" % json.dumps({k: st[k] for k in ("cache", "capacity", "waitroom")}))
+            return self.send_body(200, json.dumps(st))
+        return self.send_body(200, json.dumps(lever_state()))
+
     def api(self):
+        """API 하나. 처리 슬롯을 얻어야 처리하고, 못 얻으면 503(과부하) 또는 429(번호표)."""
         path = self.path.split("?")[0]
-        if path == "/api/ping":
-            return self.send_body(200, '{"ok":true}')
-        if path == "/api/vitals":
+        if path == "/api/vitals":  # 브라우저 보고는 슬롯 없이 받는다
             return self.vitals()
+        busy = take_slot()
+        if busy == "waitroom":
+            return self.send_body(429, json.dumps({"error": "busy, please retry", "retry_after": 1}))
+        if busy == "overload":
+            return self.send_body(503, json.dumps({"error": "overloaded"}))
+        try:
+            return self.handle_api(path)
+        finally:
+            give_slot()
+
+    def handle_api(self, path):
+        if path == "/api/ping":
+            time.sleep(0.02)  # 가벼운 요청도 조금은 걸린다 (슬롯이 꽉 차는 게 보이도록)
+            return self.send_body(200, '{"ok":true}')
         if path == "/api/gifts":
-            time.sleep(random.uniform(0.08, 0.16))  # 느린 DB 흉내
+            time.sleep(0.003 if LEVERS["cache"] else random.uniform(0.08, 0.16))  # 느린 DB 흉내 (캐시면 거의 즉시)
             # 버그 재료: 문서에는 {"items": [...]} 라고 했지만 total 만 준다
             return self.send_body(200, json.dumps({"total": 3}))
         if path == "/api/notice":
@@ -128,9 +231,13 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path.split("?")[0] == "/metrics":
             return self.metrics()
+        if self.path.split("?")[0] == "/admin/levers":
+            return self.admin()
         self.measured(self.api if self.path.startswith("/api/") else super().do_GET)
 
     def do_POST(self):
+        if self.path.split("?")[0] == "/admin/levers":
+            return self.admin()
         self.measured(self.api)
 
 
