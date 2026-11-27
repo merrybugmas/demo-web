@@ -22,7 +22,9 @@ const SCENARIOS = [
     desc: "장바구니가 비었을 때 null 인 쿠폰의 할인율을 읽는다.",
     run: () => {
       const cart = { items: [], coupon: null };
-      return cart.items.length * (1 - cart.coupon.rate); // 버그: coupon 이 null
+      // 수정: coupon 이 없을 수 있으므로 안전하게 할인율을 읽고 기본값(0)을 사용한다
+      const rate = cart.coupon && typeof cart.coupon.rate === "number" ? cart.coupon.rate : 0;
+      return cart.items.length * (1 - rate);
     },
   },
   {
