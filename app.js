@@ -9,7 +9,7 @@ const SCENARIOS = [
     run: async () => {
       const res = await fetch("/api/gifts");
       const data = await res.json();
-      return data.items.map((g) => g.name); // 버그: items 가 undefined
+      return Array.isArray(data.items) ? data.items.map((g) => g.name) : []; // 수정: items가 없으면 빈 배열로 안전 처리
     },
   },
   {
