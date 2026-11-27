@@ -3,21 +3,24 @@
 [MERRY BUGMAS](https://github.com/merrybugmas/merrybugmas) 대시보드의 **Sentry 실연동 시연용 데모 웹앱**이다.
 일부러 버그를 심어 둔 작은 상점 페이지로, 버튼을 누르면 진짜 브라우저 에러가 나고 Sentry 로 간다.
 대시보드를 `--live` 로 띄우면 그 에러가 쥐로 나타나고 병정(AI 에이전트)이 판정한다.
+이 서버가 받는 요청 수도 대시보드의 상점 앞 줄이 된다.
 
 ```
-브라우저에서 버튼 클릭 → 실제 JS 에러 → Sentry (테스트 프로젝트 merrybugmas/web) → 대시보드 --live → 쥐
+버그    브라우저에서 버튼 클릭 → 실제 JS 에러 → Sentry (테스트 프로젝트 merrybugmas/web) → 대시보드 --live → 쥐
+트래픽  서버가 받은 요청 수 → /metrics (Prometheus 형식) → 대시보드 --live → 초당 요청 수 → 줄 길이
 ```
 
 ## 실행
 
 ```bash
 python3 server.py            # http://localhost:8765  (표준 라이브러리만, 의존성 없음)
+python3 loadgen.py           # (다른 터미널) 평소 손님: 약 25 rps 로 계속 요청
 ```
 
 다른 터미널에서 대시보드:
 
 ```bash
-cd ../merrybugmas && python3 xmas_market.py --live     # .env 에 SENTRY_AUTH_TOKEN · SENTRY_ORG · SENTRY_PROJECT 필요
+cd ../merrybugmas && python3 xmas_market.py --live     # .env 에 SENTRY_AUTH_TOKEN · SENTRY_ORG · SENTRY_PROJECT (쥐), TRAFFIC_METRICS_URL=http://localhost:8765/metrics (줄)
 ```
 
 브라우저에서 버튼을 누르면 수 초 뒤 Sentry 에 이슈가 생기고, 대시보드가 다음 읽기 주기(기본 15초)에 가져온다.
@@ -38,6 +41,12 @@ cd ../merrybugmas && python3 xmas_market.py --live     # .env 에 SENTRY_AUTH_TO
 
 에러는 코드에서 `captureException` 으로 직접 보내지 않는다. 그냥 터지게 두고, Sentry 브라우저 SDK 가
 전역 에러·처리 안 된 Promise 거부로 잡아 간다 (`app.js`). 고장 난 API 는 `server.py` 가 흉내 낸다.
+
+## 트래픽
+
+- `GET /metrics` 는 `http_requests_total`(지금까지 받은 요청 수)을 Prometheus 형식으로 준다. `/metrics` 자신은 세지 않는다.
+- `loadgen.py` 가 평소 트래픽을 만든다. `python3 loadgen.py 25 --spike 110 --at 15 --for 20` 처럼 급증도 넣을 수 있다. localhost 전용이다.
+- 페이지의 **크리스마스 특가 오픈** 버튼은 브라우저에서 20초 동안 약 90 rps 로 요청을 보낸다. 대시보드의 줄이 길어지고 인파 경보가 뜬다 (대시보드 `TRAFFIC_PEAK` 기본값 100 rps 기준).
 
 ## 알아 둘 것
 

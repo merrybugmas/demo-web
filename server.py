@@ -10,13 +10,21 @@
   GET /api/notice           200, JSON 이어야 하는데 HTML 이 온다
   GET /api/member/info      503
   POST /api/payment/confirm 500
+
+트래픽
+  GET /api/ping             200 (부하용 가벼운 요청)
+  GET /metrics              Prometheus 형식. http_requests_total = 지금까지 받은 요청 수 (/metrics 자신은 빼고 센다)
+                            MERRY BUGMAS 대시보드(--live)가 이 값을 읽어 초당 요청 수로 줄을 세운다
 """
 import json
 import os
 import sys
+import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+COUNT = {"requests": 0}
+LOCK = threading.Lock()
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -31,8 +39,24 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def log_message(self, fmt, *args):  # 요청마다 한 줄씩 찍으면 부하 때 느려진다
+        pass
+
+    def count(self):
+        with LOCK:
+            COUNT["requests"] += 1
+
+    def metrics(self):
+        with LOCK:
+            n = COUNT["requests"]
+        return self.send_body(200, "# HELP http_requests_total Total HTTP requests received.\n"
+                                   "# TYPE http_requests_total counter\nhttp_requests_total %d\n" % n,
+                              "text/plain; version=0.0.4; charset=utf-8")
+
     def api(self):
         path = self.path.split("?")[0]
+        if path == "/api/ping":
+            return self.send_body(200, '{"ok":true}')
         if path == "/api/gifts":
             # 버그 재료: 문서에는 {"items": [...]} 라고 했지만 total 만 준다
             return self.send_body(200, json.dumps({"total": 3}))
@@ -45,11 +69,15 @@ class Handler(SimpleHTTPRequestHandler):
         return self.send_body(404, json.dumps({"error": "not found"}))
 
     def do_GET(self):
+        if self.path.split("?")[0] == "/metrics":
+            return self.metrics()
+        self.count()
         if self.path.startswith("/api/"):
             return self.api()
         return super().do_GET()
 
     def do_POST(self):
+        self.count()
         return self.api()
 
 

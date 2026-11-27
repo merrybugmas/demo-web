@@ -75,6 +75,25 @@ function loadScript(src) {
   });
 }
 
+// 트래픽 급증: 일정 시간 동안 가벼운 요청을 초당 rps 번 보낸다. 서버의 /metrics 카운터가 그만큼 오른다.
+let surge = null;
+function startSurge(rps, seconds, btn) {
+  if (surge) return;
+  const label = btn.textContent;
+  const until = Date.now() + seconds * 1000;
+  let sent = 0;
+  surge = setInterval(() => {
+    for (let i = 0; i < rps / 10; i++) { fetch("/api/ping").catch(() => {}); sent++; }
+    const left = Math.ceil((until - Date.now()) / 1000);
+    btn.textContent = `급증 중… ${Math.max(0, left)}초 (${sent}건)`;
+    if (Date.now() >= until) {
+      clearInterval(surge); surge = null; btn.textContent = label;
+      log(`🎄 특가 오픈 종료 — ${seconds}초 동안 ${sent}건 요청`);
+    }
+  }, 100);
+  log(`🎄 크리스마스 특가 오픈! 약 ${rps} rps 로 ${seconds}초`);
+}
+
 const logEl = document.getElementById("log");
 function log(line) {
   const t = new Date().toLocaleTimeString("ko-KR", { hour12: false });
@@ -100,6 +119,18 @@ for (const s of SCENARIOS) {
   btn.textContent = "눌러서 버그 내기";
   // 핸들러 안에서 잡지 않는다: 동기 에러는 전역 error 로, async 에러는 unhandledrejection 으로 올라간다
   btn.addEventListener("click", () => s.run());
+  card.appendChild(btn);
+  cards.appendChild(card);
+}
+
+{
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<span class="tag traffic">트래픽 · 실제 요청</span><h2>크리스마스 특가 오픈</h2>
+    <p>20초 동안 서버에 요청을 몰아 보낸다. 대시보드 트래픽 화면의 줄이 길어진다.</p>`;
+  const btn = document.createElement("button");
+  btn.textContent = "눌러서 손님 몰기";
+  btn.addEventListener("click", () => startSurge(90, 20, btn));
   card.appendChild(btn);
   cards.appendChild(card);
 }
