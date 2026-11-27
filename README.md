@@ -44,7 +44,12 @@ cd ../merrybugmas && python3 xmas_market.py --live     # .env 에 SENTRY_AUTH_TO
 
 ## 트래픽
 
-- `GET /metrics` 는 `http_requests_total`(지금까지 받은 요청 수)을 Prometheus 형식으로 준다. `/metrics` 자신은 세지 않는다.
+- `GET /metrics` 는 Prometheus 형식으로 아래를 준다. `/metrics` 자신은 세지 않는다.
+  - `http_requests_total{status="2xx|3xx|4xx|5xx"}` — 받은 요청 수 (대시보드: rps · 5xx 비율)
+  - `http_request_duration_seconds_sum` / `_count` — 서버가 잰 처리 시간 (대시보드: 평균 응답 시간). `/api/gifts` 는 느린 DB 를 흉내 내 80~160ms 걸린다
+  - `web_vitals_lcp_seconds` · `web_vitals_cls` · `web_vitals_inp_seconds` · `web_vitals_ttfb_seconds` — 아래 Web Vitals 의 p75
+- **Web Vitals**: 페이지(`app.js`)가 브라우저의 `PerformanceObserver` 로 LCP · CLS · INP · TTFB 를 실제로 재서 `POST /api/vitals` 로 보고한다. 서버는 최근 50건의 p75 를 낸다. LCP · CLS · INP 는 Chromium 계열에서만 측정되고, INP 는 사람이 실제로 클릭해야 생긴다. 보고가 없는 항목은 내보내지 않는다. 탭을 뒤에 둔 채 열면 화면이 늦게 그려져 LCP 가 크게 나온다
+- 5xx 비율을 올려 보려면 `python3 loadgen.py 25 --errors 0.15` (요청의 15% 를 503 나는 API 로).
 - `loadgen.py` 가 평소 트래픽을 만든다. `python3 loadgen.py 25 --spike 110 --at 15 --for 20` 처럼 급증도 넣을 수 있다. localhost 전용이다.
 - 페이지의 **크리스마스 특가 오픈** 버튼은 브라우저에서 20초 동안 약 90 rps 로 요청을 보낸다. 대시보드의 줄이 길어지고 인파 경보가 뜬다 (대시보드 `TRAFFIC_PEAK` 기본값 100 rps 기준).
 

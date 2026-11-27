@@ -5,6 +5,9 @@
   python3 loadgen.py                 # 약 25 rps 로 계속 (Ctrl-C 로 종료)
   python3 loadgen.py 40              # 약 40 rps
   python3 loadgen.py 25 --spike 110 --at 15 --for 20   # 15초 뒤 20초 동안 110 rps 로 급증
+  python3 loadgen.py 25 --errors 0.15                  # 요청의 15% 를 503 나는 API 로 (5xx 비율이 오른다)
+
+요청 섞임: 대부분 /api/ping, 10% 는 느린 /api/gifts, --errors 비율만큼은 503 을 주는 /api/member/info.
 
 자기 컴퓨터의 demo-web 서버(localhost)에만 쓴다. 남의 서버에 쓰지 않는다.
 """
@@ -31,8 +34,16 @@ def main():
     ap.add_argument("--spike", type=float, default=0, help="급증 때의 rps")
     ap.add_argument("--at", type=float, default=15, help="급증 시작 (초)")
     ap.add_argument("--for", dest="dur", type=float, default=20, help="급증 길이 (초)")
+    ap.add_argument("--errors", type=float, default=0.0, help="503 나는 API 를 부를 비율 (0~1, 기본 0)")
     args = ap.parse_args()
-    url = "http://127.0.0.1:%d/api/ping" % args.port  # localhost 고정
+    base = "http://127.0.0.1:%d" % args.port  # localhost 고정
+    url = base + "/api/ping"
+
+    def pick():
+        r = random.random()
+        if r < args.errors:
+            return base + "/api/member/info"
+        return base + ("/api/gifts" if r < args.errors + 0.10 else "/api/ping")
     print("loadgen: %s 에 약 %g rps%s" % (url, args.rps, (" · %g초 뒤 %g초 동안 %g rps" % (args.at, args.dur, args.spike)) if args.spike else ""))
     t0, acc, last = time.time(), 0.0, time.time()
     try:
@@ -47,7 +58,7 @@ def main():
             last = now
             while acc >= 1:
                 acc -= 1
-                threading.Thread(target=hit, args=(url,), daemon=True).start()
+                threading.Thread(target=hit, args=(pick(),), daemon=True).start()
     except KeyboardInterrupt:
         sys.exit(0)
 

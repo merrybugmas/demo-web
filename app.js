@@ -94,6 +94,35 @@ function startSurge(rps, seconds, btn) {
   log(`🎄 크리스마스 특가 오픈! 약 ${rps} rps 로 ${seconds}초`);
 }
 
+// Web Vitals: 브라우저가 실제로 잰 값을 서버에 보고한다 (서버가 /metrics 로 내보내고 대시보드가 읽는다).
+// LCP·CLS·INP 는 Chromium 계열에서만 측정된다. 못 잰 항목은 보내지 않는다.
+const vitals = {};
+function observe(type, onEntry, opts) {
+  try {
+    new PerformanceObserver((list) => list.getEntries().forEach(onEntry)).observe({ type, buffered: true, ...opts });
+  } catch (e) { /* 이 브라우저는 이 항목을 지원하지 않는다 */ }
+}
+observe("largest-contentful-paint", (e) => { vitals.lcp = e.startTime / 1000; });
+observe("layout-shift", (e) => { if (!e.hadRecentInput) vitals.cls = (vitals.cls || 0) + e.value; });
+observe("event", (e) => { if (e.interactionId) vitals.inp = Math.max(vitals.inp || 0, e.duration / 1000); }, { durationThreshold: 16 });
+{
+  const nav = performance.getEntriesByType("navigation")[0];
+  if (nav && nav.responseStart > 0) vitals.ttfb = nav.responseStart / 1000;
+}
+let vitalsSent = "";
+function reportVitals() {
+  if (vitals.lcp !== undefined && vitals.cls === undefined) vitals.cls = 0; // 화면이 그려졌고 밀림이 없었다
+  const body = JSON.stringify(vitals);
+  if (body === "{}" || body === vitalsSent) return;
+  vitalsSent = body;
+  if (!(navigator.sendBeacon && navigator.sendBeacon("/api/vitals", body))) {
+    fetch("/api/vitals", { method: "POST", body, keepalive: true }).catch(() => {});
+  }
+}
+setTimeout(reportVitals, 2500);
+setInterval(reportVitals, 5000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") reportVitals(); });
+
 const logEl = document.getElementById("log");
 function log(line) {
   const t = new Date().toLocaleTimeString("ko-KR", { hour12: false });
