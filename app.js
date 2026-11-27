@@ -15,7 +15,7 @@ const SCENARIOS = [
   {
     id: "date", kind: "fixable", title: "배송 예정일 표시",
     desc: "잘못된 날짜 문자열을 검사 없이 ISO 형식으로 바꾼다.",
-    run: () => new Date("2026-12-25T25:61").toISOString(), // 버그: Invalid Date
+    run: () => { const d = new Date("2026-12-25T25:61"); if (isNaN(d.getTime())) { return "Invalid Date"; } return d.toISOString(); }, // 버그: 잘못된 날짜 문자열을 검사해 Invalid Date 방어
   },
   {
     id: "cart", kind: "fixable", title: "장바구니 합계",
