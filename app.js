@@ -48,9 +48,37 @@ const SCENARIOS = [
     desc: "존재하지 않는 외부 광고 스크립트를 부른다. 우리 코드 문제가 아니다.",
     run: () => loadScript("https://ads.bugmas-demo.invalid/banner.js"),
   },
+  // 서버 버그: 에러는 서버(server.py) 안에서 나고 서버가 Sentry 로 보낸다. 브라우저는 응답만 보여 주고 던지지 않는다
+  // (던지면 같은 버그가 브라우저 쥐로 하나 더 생긴다)
+  {
+    id: "coupon", kind: "fixable", layer: "server", title: "쿠폰 적용",
+    desc: "서버가 쿠폰의 할인율을 없는 키(rate)로 읽는다. 쿠폰 데이터에는 percent 만 있다.",
+    run: () => callServer("/api/coupon/apply"),
+  },
+  {
+    id: "reviews", kind: "fixable", layer: "server", title: "평균 별점",
+    desc: "리뷰가 0건인 상품의 평균을 0 으로 나눠 구한다.",
+    run: () => callServer("/api/reviews/summary"),
+  },
+  {
+    id: "stock", kind: "human", layer: "server", title: "재고 확인",
+    desc: "서버가 재고 서버에 연결하는데 재고 서버가 꺼져 있다. 코드로는 못 고친다.",
+    run: () => callServer("/api/stock"),
+  },
 ];
 
 const KIND_LABEL = { fixable: "fixable · 코드 버그", human: "needs-human · 백엔드", noise: "noise · 외부 출처" };
+const SERVER_LABEL = { fixable: "fixable · 서버 버그", human: "needs-human · 서버 인프라" };
+
+// 서버 버그 API 를 부르고 결과만 로그에 남긴다 (에러는 서버가 Sentry 로 보낸다)
+async function callServer(path) {
+  try {
+    const res = await fetch(path);
+    log(res.ok ? `🖥️ 서버 ${res.status} ${path}` : `🖥️ 서버 에러 ${res.status} ${path} — 서버가 Sentry 로 보낸다 (SENTRY_DSN 설정 시)`);
+  } catch (e) {
+    log(`🖥️ 서버에 연결 못 함 ${path} (${e.message})`);
+  }
+}
 
 // 호출 지점마다 따로 던진다: Sentry 는 스택이 같으면 한 이슈로 묶기 때문에, API 별로 이슈가 나뉘게 한다
 async function fetchMemberInfo() {
@@ -141,7 +169,7 @@ for (const s of SCENARIOS) {
   const card = document.createElement("div");
   card.className = "card";
   const kindClass = s.kind === "human" ? "human" : s.kind;
-  card.innerHTML = `<span class="tag ${kindClass}">${KIND_LABEL[s.kind]}</span><h2></h2><p></p>`;
+  card.innerHTML = `<span class="tag ${kindClass}">${(s.layer === "server" ? SERVER_LABEL : KIND_LABEL)[s.kind]}</span><h2></h2><p></p>`;
   card.querySelector("h2").textContent = s.title;
   card.querySelector("p").textContent = s.desc;
   const btn = document.createElement("button");
