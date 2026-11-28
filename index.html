@@ -40,6 +40,7 @@
 <main>
   <h1>🎁 Bugmas Gift Shop</h1>
   <p class="lead">일부러 버그를 심어 둔 데모 상점. 버튼을 누르면 <b>진짜 브라우저 에러</b>가 나고 Sentry 로 간다.
+    "서버 버그" 카드는 서버 안에서 Python 예외가 나고, 서버가 Sentry 로 보낸다(<code>SENTRY_DSN</code> 설정 시).
     MERRY BUGMAS 대시보드(<code>--live</code>)에서는 그 에러가 쥐로, 이 서버가 받는 요청 수가 상점 앞 줄로 나타난다.</p>
 
   <div class="grid" id="cards"></div>

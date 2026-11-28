@@ -11,6 +11,11 @@
   GET /api/member/info      503
   POST /api/payment/confirm 500
 
+서버 버그 (서버 안에서 진짜 Python 예외가 난다 → 500, SENTRY_DSN 이 있으면 Sentry 로 보낸다: sentry_server.py)
+  GET /api/coupon/apply     KeyError: 'rate'           쿠폰 데이터는 percent 인데 rate 를 읽는다 (apply_coupon)
+  GET /api/reviews/summary  ZeroDivisionError          리뷰가 0건인 상품의 평균 별점 (average_rating)
+  GET /api/stock            ConnectionRefusedError     데모에 없는 재고 서버에 연결한다 (check_stock, 코드로 못 고친다)
+
 트래픽
   GET /api/ping             200 (부하용 가벼운 요청)
   GET /metrics              Prometheus 형식 (/metrics 자신은 빼고 센다)
@@ -38,10 +43,13 @@
 import json
 import os
 import random
+import socket
 import sys
 import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+import sentry_server
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 LOCK = threading.Lock()
@@ -55,6 +63,34 @@ SLOTS = {"inflight": 0, "waiting": 0}
 REJECTED = {"overload": 0, "waitroom": 0}
 SLOT_CV = threading.Condition()
 OVERLOAD_WAIT, WAITROOM_WAIT = 1.0, 0.15  # 자리를 기다리는 최대 시간(초): 평소 · 번호표 켜짐
+REPORTER = None  # 서버 에러 → Sentry (main 에서 SENTRY_DSN 으로 만든다. None 이면 안 보낸다)
+
+# 서버 버그 재료
+CART = [{"name": "진저브레드 쿠키", "price": 4500, "qty": 2}, {"name": "유리 오너먼트", "price": 12000, "qty": 1}]
+COUPONS = {"XMAS10": {"code": "XMAS10", "percent": 10}}  # 할인율 키는 percent (rate 가 아니다)
+REVIEWS = {"g1": [5, 4, 5], "g9": []}  # g9 는 아직 리뷰가 없다
+STOCK_PORT = int(os.environ.get("DEMO_STOCK_PORT", "8799") or 8799)  # 재고 서버 (데모에는 없다)
+
+
+def apply_coupon(cart, coupon):
+    """쿠폰을 적용한 합계."""
+    subtotal = sum(i["price"] * i["qty"] for i in cart)
+    return {"coupon": coupon["code"], "subtotal": subtotal,
+            "total": round(subtotal * (1 - coupon["rate"]))}  # 버그: 쿠폰에는 rate 가 없다 → KeyError
+
+
+def average_rating(gift_id):
+    """상품의 평균 별점."""
+    scores = REVIEWS.get(gift_id, [])
+    return {"gift": gift_id, "count": len(scores),
+            "average": round(sum(scores) / len(scores), 2)}  # 버그: 리뷰 0건이면 0 으로 나눈다
+
+
+def check_stock(gift_id):
+    """재고 서버에 물어본다. 데모에는 재고 서버가 없어 연결이 거절된다 (코드 버그가 아니라 인프라 문제)."""
+    with socket.create_connection(("127.0.0.1", STOCK_PORT), timeout=0.5) as conn:
+        conn.sendall(("STOCK %s\n" % gift_id).encode())
+        return {"gift": gift_id, "stock": conn.recv(64).decode(errors="replace").strip()}
 
 
 def take_slot():
@@ -209,6 +245,11 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_body(503, json.dumps({"error": "overloaded"}))
         try:
             return self.handle_api(path)
+        except Exception as e:  # noqa: BLE001 — 처리 안 된 서버 에러: 로그 한 줄 + Sentry, 손님에게는 500
+            print("server error: %s %s - %s: %s" % (self.command, path, type(e).__name__, e), file=sys.stderr)
+            if REPORTER is not None:
+                REPORTER.capture(e, self.command, path)
+            return self.send_body(500, json.dumps({"error": "internal server error"}))
         finally:
             give_slot()
 
@@ -226,6 +267,12 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_body(503, json.dumps({"error": "service unavailable"}))
         if path == "/api/payment/confirm":
             return self.send_body(500, json.dumps({"error": "internal server error"}))
+        if path == "/api/coupon/apply":
+            return self.send_body(200, json.dumps(apply_coupon(CART, COUPONS["XMAS10"]), ensure_ascii=False))
+        if path == "/api/reviews/summary":
+            return self.send_body(200, json.dumps(average_rating("g9")))
+        if path == "/api/stock":
+            return self.send_body(200, json.dumps(check_stock("g1")))
         return self.send_body(404, json.dumps({"error": "not found"}))
 
     def do_GET(self):
@@ -242,8 +289,11 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main():
+    global REPORTER
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
+    REPORTER = sentry_server.Reporter()
     print("demo-web: http://localhost:%d  (Ctrl-C 로 종료)" % port)
+    print(REPORTER.describe())
     ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
 
